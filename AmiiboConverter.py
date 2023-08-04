@@ -99,19 +99,17 @@ class AmiiboConverter:
         if input_extension == ".nfc":
             with open(input_path, "rt", encoding="utf-8") as fn_r:
                 contents = fn_r.readlines()
-            hexvalues = ""
-            for line in contents:
-                if re.search("Page ?[0-9]{1,3}", line):
-                    hexvalues += line.split(":")[1].strip().replace(" ", "")
+            hexvalues = "".join(
+                line.split(":")[1].strip().replace(" ", "")
+                for line in contents
+                if re.search("Page ?[0-9]{1,3}", line)
+            )
             data = bytes.fromhex(hexvalues)
         elif input_extension == ".bin":
             with open(input_path, "rb") as fb_r:
                 data = fb_r.read()
         else:
             data = self._build_from_amiiboid(input_path.strip())
-        if not data:
-            pass
-            #return False
         while len(data) < 540:
             data += bytes(1)
         self.byte_data = data[:540]
@@ -126,29 +124,7 @@ class AmiiboConverter:
         :return: Flipper Compatible string
         """
         pages, page_count = self._make_pages()
-        nfc_content = (
-            f"Filetype: Flipper NFC device\n"
-            f"Version: 2\n"
-            f"# Nfc device type can be UID, Mifare Ultralight, Mifare Classic, Bank card\n"
-            f"Device type: NTAG215\n"
-            f"# UID, ATQA and SAK are common for all formats\n"
-            f"UID: {self._get_uid()}\n"
-            f"ATQA: 44 00\n"
-            f"SAK: 00\n"
-            f"# Mifare Ultralight specific data\n"
-            f"Signature: {('00 '*32).strip()}\n"
-            f"Mifare version: 00 04 04 02 01 00 11 03\n"
-            f"Counter 0: 0\n"
-            f"Tearing 0: 00\n"
-            f"Counter 1: 0\n"
-            f"Tearing 1: 00\n"
-            f"Counter 2: 0\n"
-            f"Tearing 2: 00\n"
-            f"Pages total: {page_count}\n"
-            f"{pages}"
-        )
-
-        return nfc_content
+        return f"Filetype: Flipper NFC device\nVersion: 2\n# Nfc device type can be UID, Mifare Ultralight, Mifare Classic, Bank card\nDevice type: NTAG215\n# UID, ATQA and SAK are common for all formats\nUID: {self._get_uid()}\nATQA: 44 00\nSAK: 00\n# Mifare Ultralight specific data\nSignature: {('00 ' * 32).strip()}\nMifare version: 00 04 04 02 01 00 11 03\nCounter 0: 0\nTearing 0: 00\nCounter 1: 0\nTearing 1: 00\nCounter 2: 0\nTearing 2: 00\nPages total: {page_count}\n{pages}"
 
     def _get_uid(self) -> str:
         """
@@ -305,18 +281,16 @@ class AmiiboConverter:
         :param multi: Number of duplicates to make from each input
         :return: Number of files created, list of errors
         """
-        if multi_input:
-            to_write = multi_input
-        else:
-            to_write = self.parsed_input
+        to_write = multi_input if multi_input else self.parsed_input
         failed = []
         counter = 0
         for file in to_write:
             logging.debug(f"Parsing {file[0]}")
             if multi > 1:
-                multiply = []
-                for i in range(0,multi):
-                    multiply.append([file[0], file[1]+"_"+str(i+1).zfill(2)])
+                multiply = [
+                    [file[0], f"{file[1]}_{str(i + 1).zfill(2)}"]
+                    for i in range(0, multi)
+                ]
                 result = self.write_files(multi_input=multiply)
                 counter += result[0]
                 for fail in result[1]:
@@ -348,12 +322,9 @@ class AmiiboConverter:
         :param parsed_data: List with source and name
         :param truncate: Whether to strip the extra bytes not used by NTAG215
         """
-        if truncate:
-            data = self.byte_data
-        else:
-            data = self.byte_data + self.extra_data
+        data = self.byte_data if truncate else self.byte_data + self.extra_data
         filename = self._get_save_path(parsed_data)
-        with open(filename + ".bin", "wb") as fb_w:
+        with open(f"{filename}.bin", "wb") as fb_w:
             fb_w.write(data)
         logging.info(f"Wrote to {filename}.bin")
 
@@ -366,7 +337,7 @@ class AmiiboConverter:
         """
         nfc_content = self._assemble_nfc()
         filename = self._get_save_path(parsed_data)
-        with open(filename + ".nfc", "wt", encoding="utf-8") as ft_w:
+        with open(f"{filename}.nfc", "wt", encoding="utf-8") as ft_w:
             ft_w.write(nfc_content)
         logging.info(f"Wrote to {filename}.nfc")
 
@@ -391,27 +362,25 @@ class AmiiboConverter:
                         except ValueError:
                             name, amiibo_id = line, line
                         self.parsed_input.append([amiibo_id.strip(), name.strip()])
-            else:
-                if len(source) >= 16:
-                    try:
-                        name, amiibo_id = source.split(":")
-                    except ValueError:
-                        name, amiibo_id = source, source
-                    self.parsed_input.append([amiibo_id.strip(), name.strip()])
+            elif len(source) >= 16:
+                try:
+                    name, amiibo_id = source.split(":")
+                except ValueError:
+                    name, amiibo_id = source, source
+                self.parsed_input.append([amiibo_id.strip(), name.strip()])
+        elif os.path.isfile(source):
+            if self.mode[0] in os.path.splitext(source)[1]:
+                name = pathlib.Path(source).stem
+                self.parsed_input.append([source, name])
         else:
-            if os.path.isfile(source):
-                if self.mode[0] in os.path.splitext(source)[1]:
-                    name = pathlib.Path(source).stem
-                    self.parsed_input.append([source, name])
-            else:
-                for path in os.listdir(source):
-                    new_path = os.path.join(source, path)
-                    if os.path.isfile(new_path):
-                        if self.mode[0] in os.path.splitext(new_path)[1]:
-                            name = pathlib.Path(new_path).stem
-                            self.parsed_input.append([new_path, name])
-                    else:
-                        self.set_input(new_path)
+            for path in os.listdir(source):
+                new_path = os.path.join(source, path)
+                if os.path.isfile(new_path):
+                    if self.mode[0] in os.path.splitext(new_path)[1]:
+                        name = pathlib.Path(new_path).stem
+                        self.parsed_input.append([new_path, name])
+                else:
+                    self.set_input(new_path)
 
     def set_output(self, output_path: str):
         """
@@ -509,8 +478,7 @@ def get_args():
         type=int,
         help="Do you want duplicates?",
     )
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
 
 
 def validate_arguments(args) -> bool:
@@ -528,7 +496,7 @@ def validate_arguments(args) -> bool:
     if args.output:
         if (len(args.input) > 1) and (os.path.splitext(args.output)[1] in [".nfc", ".bin"]):
             logging.basicConfig(level=logging.ERROR)
-            logging.error(f"Unable to write multiple inputs to a single file!")
+            logging.error("Unable to write multiple inputs to a single file!")
             return False
     modes = ["bin2bin", "bin2nfc", "id2bin", "id2nfc", "nfc2bin", "nfc2nfc"]
     if args.mode not in modes:
